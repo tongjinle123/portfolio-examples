@@ -5,7 +5,7 @@
 3.We do interpolation analysis of weather elements such as temperature, humidity, pressure and wind speed, and use Penman equation to calculate the ET0, which can get the law of water transpiration in the area. It's of great value for the research of meteorological data mining, evaluation of numerical weather forecasting, and climate change, etc.  
 4.The input form of ET0 is discrete points, the form of each point is [longitude, latitude, pressure/wind speed/temperature], and there are more than 2000 such points involved in the calculation every day.  
 5.There are many models involved in kriging algorithm, we use linear semivariogram function.  
-5.Our project is based on the open source kriging algorithm in `1` and the code provided by Agilor.  
+6.Our project is based on the open source kriging algorithm in `1` and the code provided by Agilor.  
 ## Environment
 This has been tested with the following dependencies:
 - Poplar SDK version 2.2

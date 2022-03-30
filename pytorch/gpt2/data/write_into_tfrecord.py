@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2021 Graphcore Ltd. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,17 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import pickle
 import random
-import argparse
 import collections
-
+import os
+import pdb
+import pickle
 from tqdm import tqdm
+import argparse
+
 try:
     import tensorflow as tf
 except ImportError:
-    raise ImportError("Tensorflow is required to generate data for this application. "
+    raise ImportError("TensorFlow is required to generate data for this application. "
                       "Please install with: 'pip install tensorflow==1.15.0'")
 
 
@@ -47,7 +47,8 @@ def write_instance_to_example_files(train_path, output_dir, max_seq_length, stri
             features = collections.OrderedDict()
             features["input_ids"] = create_int_feature(input_ids)
 
-            tf_example = tf.train.Example(features=tf.train.Features(feature=features))
+            tf_example = tf.train.Example(
+                features=tf.train.Features(feature=features))
             writers[writer_index].write(tf_example.SerializeToString())
             if total_written % 100 == 0:
                 # update writer_index
@@ -60,7 +61,8 @@ def write_instance_to_example_files(train_path, output_dir, max_seq_length, stri
     writers = []
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    output_files = [os.path.join(output_dir, 'data_{}.tfrecord'.format(i)) for i in range(num_output)]
+    output_files = [os.path.join(
+        output_dir, 'data_{}.tfrecord'.format(i)) for i in range(num_output)]
     for output_file in output_files:
         writers.append(tf.io.TFRecordWriter(output_file))
 
@@ -72,17 +74,23 @@ def write_instance_to_example_files(train_path, output_dir, max_seq_length, stri
 
 
 def create_int_feature(values):
-    feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
+    feature = tf.train.Feature(
+        int64_list=tf.train.Int64List(value=list(values)))
     return feature
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input-file-path', default='./wikicorpus_en_one_article_per_line2.pkl', required=False, type=str)
-    parser.add_argument('--output-file-path', default='./tfrecords_50264_128/', required=False, type=str)
-    parser.add_argument('--seq-length', default=128, type=int, required=False, help='sequence length of dataset')
-    parser.add_argument('--stride', default=128, type=int, required=False, help='stride window size to sample dataset')
-    parser.add_argument('--num-output', type=int, default=4, help="number of output files")
+    parser.add_argument(
+        '--input-file-path', default='./wikicorpus_en_one_article_per_line2.pkl', required=False, type=str)
+    parser.add_argument(
+        '--output-file-path', default='./tfrecords_50264_128/', required=False, type=str)
+    parser.add_argument('--seq-length', default=128, type=int,
+                        required=False, help='sequence length of dataset')
+    parser.add_argument('--stride', default=128, type=int,
+                        required=False, help='stride window size to sample dataset')
+    parser.add_argument('--num-output', type=int, default=4,
+                        help="number of output files")
     args = parser.parse_args()
     write_instance_to_example_files(train_path=args.input_file_path, output_dir=args.output_file_path,
                                     max_seq_length=args.seq_length, stride=args.stride, num_output=args.num_output)

@@ -3,5 +3,7 @@ datasets>=1.7.0
 tokenizers>=0.10.3
 scipy>=1.5.4
 wandb==0.12.1
-horovod>=0.22.0 --no-binary=horovod
 tfrecord>=1.13
+pytest==6.2.5
+pytest-pythonpath>=0.7.3
+horovod>=0.24.0 --no-binary=horovod

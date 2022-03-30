@@ -12,7 +12,7 @@ python train_gpt2.py \
     --ipus-per-replica 8 \
     --replication-factor 2 \
     --epochs 5 \
-    --gradient-accumulation 256 \
+    --gradient-accumulation 4096 \
     --batches-per-step 8 \
     --batch-size 1 \
     --enable-sequence-serialized False \

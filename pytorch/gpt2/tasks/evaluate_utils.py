@@ -1,6 +1,6 @@
 # coding=utf-8
-# Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 # Copyright (c) 2021 Graphcore Ltd. All rights reserved.
+# Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# This file has been modified by Graphcore Ltd.
 
 import json
 import math
@@ -69,6 +71,7 @@ class _LMDataset(torch.utils.data.Dataset):
             pad_mask[:-self.overalapping_eval] *= 0
 
         return {'text': np.array(tokens), 'pad_mask': pad_mask}
+
 
 class _LambadaDataset(torch.utils.data.Dataset):
 

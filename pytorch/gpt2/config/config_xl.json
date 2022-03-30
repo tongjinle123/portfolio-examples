@@ -1,13 +1,12 @@
 {
-  "_name_or_path": "model/epoch29",
   "activation_function": "gelu",
   "architectures": [
     "GPT2LMHeadModel"
   ],
   "attn_pdrop": 0.1,
-  "bos_token_id": 30522,
+  "bos_token_id": 50272,
   "embd_pdrop": 0.1,
-  "eos_token_id": 30522,
+  "eos_token_id": 50272,
   "gradient_checkpointing": false,
   "initializer_range": 0.02,
   "layer_norm_epsilon": 1e-05,
@@ -15,7 +14,6 @@
   "n_ctx": 1024,
   "n_embd": 1600,
   "n_head": 25,
-  "n_inner": null,
   "n_layer": 48,
   "n_positions": 1024,
   "output_past": false,
@@ -31,8 +29,5 @@
       "max_length": 400
     }
   },
-  "tokenizer_class": "BertTokenizer",
-  "transformers_version": "4.2.0",
-  "use_cache": true,
-  "vocab_size": 30524
+  "vocab_size": 50272
 }

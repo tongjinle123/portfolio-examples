@@ -21,7 +21,7 @@ python train_gpt2.py \
     --matmul-proportion 0.40 0.12 0.15 0.15 0.15 0.15 0.15 0.10 \
     --ipus-per-replica 8 \
     --epochs 5 \
-    --gradient-accumulation 256 \
+    --gradient-accumulation 1024 \
     --batches-per-step 8 \
     --batch-size 1 \
     --enable-sequence-serialized False \

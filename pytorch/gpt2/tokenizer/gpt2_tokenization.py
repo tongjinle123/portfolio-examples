@@ -1,6 +1,6 @@
 # coding=utf-8
+# Copyright (c) 2021 Graphcore Ltd. All rights reserved.
 # Copyright 2018 The Open AI Team Authors and The HuggingFace Inc. team.
-# Copyright (c) 2022 Graphcore Ltd. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# This file has been modified by Graphcore Ltd.
 
 """Tokenization classes for OpenAI GPT."""
 
@@ -81,6 +83,7 @@ class GPT2Tokenizer(object):
     GPT-2 BPE tokenizer. Peculiarities:
         - Byte-level BPE
     """
+
     def __init__(self, vocab_file, merges_file, errors='replace',
                  special_tokens=None, max_len=None):
         self.max_len = max_len if max_len is not None else int(1e12)
@@ -117,7 +120,8 @@ class GPT2Tokenizer(object):
             return
         self.special_tokens = dict((tok, len(self.encoder) + i)
                                    for i, tok in enumerate(special_tokens))
-        self.special_tokens_decoder = {v: k for k, v in self.special_tokens.items()}
+        self.special_tokens_decoder = {
+            v: k for k, v in self.special_tokens.items()}
         logger.info("Special tokens {}".format(self.special_tokens))
 
     def bpe(self, token):
@@ -130,7 +134,8 @@ class GPT2Tokenizer(object):
             return token
 
         while True:
-            bigram = min(pairs, key=lambda pair: self.bpe_ranks.get(pair, float('inf')))
+            bigram = min(pairs, key=lambda pair: self.bpe_ranks.get(
+                pair, float('inf')))
             if bigram not in self.bpe_ranks:
                 break
             first, second = bigram
@@ -168,8 +173,10 @@ class GPT2Tokenizer(object):
             if sys.version_info[0] == 2:
                 token = ''.join(self.byte_encoder[ord(b)] for b in token)
             else:
-                token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
-            bpe_tokens.extend(bpe_token for bpe_token in self.bpe(token).split(' '))
+                token = ''.join(self.byte_encoder[b]
+                                for b in token.encode('utf-8'))
+            bpe_tokens.extend(
+                bpe_token for bpe_token in self.bpe(token).split(' '))
         return bpe_tokens
 
     def convert_tokens_to_ids(self, tokens):
@@ -210,5 +217,6 @@ class GPT2Tokenizer(object):
 
     def decode(self, tokens):
         text = ''.join([self.decoder[token] for token in tokens])
-        text = bytearray([self.byte_decoder[c] for c in text]).decode('utf-8', errors=self.errors)
+        text = bytearray([self.byte_decoder[c]
+                         for c in text]).decode('utf-8', errors=self.errors)
         return text

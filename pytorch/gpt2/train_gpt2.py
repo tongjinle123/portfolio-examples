@@ -16,7 +16,6 @@ import os
 import sys
 import time
 import logging
-import argparse
 from pathlib import Path
 
 import wandb
@@ -26,24 +25,24 @@ import torch.onnx
 import poptorch
 import popdist
 import popdist.poptorch
-import horovod.torch as hvd
 
 from poptorch import DataLoader
 from poptorch.enums import DataLoaderMode
 from torch.nn import CrossEntropyLoss
 from transformers import GPT2Config, GPT2LMHeadModel
 
+from arguments import set_args
 from ipu_options import get_options
 from model.optimized_gpt2_attn import OptimizedGPT2Attention
-from utils import (SerializedLinear, _get_layer_ipu, _WorkerInit,
+from tools import (SerializedLinear, _get_layer_ipu, _WorkerInit,
                    calculate_acc, collate_fn, get_generated_datum,
                    get_lr_scheduler, get_optimizer, load_dataset,
-                   outline_attribute, recomputation_checkpoint, str_to_bool,
+                   outline_attribute, recomputation_checkpoint,
                    sync_metrics)
 
-MODEL_CONFIG = {'gpt2': 'config/config.json', 'gpt2-medium': 'config/config_medium.json',
-                'gpt2-large': 'config/config_large.json', 'gpt2-xl': 'config/config_xl.json'}
-
+MODEL_CONFIG = {'gpt2-test': 'config/config_test.json', 'gpt2': 'config/config.json',
+                'gpt2-medium': 'config/config_medium.json', 'gpt2-large': 'config/config_large.json', 'gpt2-xl': 'config/config_xl.json'}
+file_dir = os.path.dirname(os.path.realpath(__file__))
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
@@ -52,119 +51,20 @@ def logger(msg):
         logging.info(msg)
 
 
-def set_args():
-    """
-    Sets up the arguments.
-    """
-    parser = argparse.ArgumentParser()
-
-    # model
-    parser.add_argument('--model', type=str, default='gpt2', choices=('gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'),
-                        help='model to train')
-    parser.add_argument('--pretrained-checkpoint', default='', type=str, required=False, help='pretrained model path')
-    parser.add_argument("--enable-half-partials", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="enable half partials or not")
-    parser.add_argument('--save-model-path', default=None, type=str, required=False,
-                        help='model path to save')
-    parser.add_argument('--executable-cache-dir', default=None, type=str, required=False,
-                        help='executable cache dir')
-    parser.add_argument('--training-steps', default=10000, type=int, required=False, help='training steps')
-    parser.add_argument("--compile-only", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="Create an offline IPU target that can only be used for offline compilation.")
-    parser.add_argument("--custom-ops", type=str_to_bool, nargs="?", const=True, default=True, help="Enable custom ops")
-
-    # dataset
-    parser.add_argument('--train-path', default='data/train.pkl', type=str, required=False, help='dataset path')
-    parser.add_argument('--data-prefix', type=str, required=False, help='file prefix while using dynamic dataset')
-    parser.add_argument('--tfrecord-path', nargs="+", help='tfrecord dataset path')
-    parser.add_argument('--max-len', default=128, type=int, required=False, help='max length of input sequence')
-    parser.add_argument("--enable-sequence-serialized", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="enable-sequence-serialize")
-    parser.add_argument('--serialized-seq-len', default=128, type=int, required=False, help='serialized-seq-len')
-    parser.add_argument('--stride', default=128, type=int, required=False, help='stride window size to sample dataset')
-    parser.add_argument('--val-num', type=int, default=0, help='validate dataset length')
-    parser.add_argument('--seed', type=int, default=1234, help='random seed')
-    parser.add_argument('--num-workers', type=int, default=4, help="workers for dataloader")
-    parser.add_argument("--async-dataloader", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="async dataloader")
-
-    # train
-    parser.add_argument('--epochs', default=1, type=int, required=False, help='epochs for training')
-    parser.add_argument('--batch-size', type=int, default=1, help='batch size (default = 1)')
-    parser.add_argument('--optimizer', default='AdamW', type=str, required=False, help='optimizer')
-    parser.add_argument('--weight-decay', default=0.0, type=float, required=False, help='weight_decay')
-    parser.add_argument('--learning-rate', default=0.00001, type=float, required=False, help='learning_rate')
-    parser.add_argument('--loss-scaling', default=50000.0, type=float, required=False, help='loss_scaling')
-    parser.add_argument('--lr-warmup', default=0.1, type=float, required=False, help='fraction of train steps(or --lr-decay-steps) to linearly warmup learning rate over')
-    parser.add_argument('--lr-warmup-steps', default=None, type=int, required=False, help='number of steps to linearly warmup learning rate over.')
-    parser.add_argument('--lr-decay-steps', default=None, type=int, required=False, help='number of steps to decay learning rate over, if None defaults to train steps')
-    parser.add_argument('--lr-schedule', default='constant', type=str, choices=('linear', 'constant', 'cosine'),
-                        required=False, help='lr_schedule')
-    parser.add_argument('--log-steps', default=1, type=int, required=False, help='log_steps')
-    parser.add_argument('--save-per-epochs', default=1, type=int, required=False, help='save-per-epochs')
-    parser.add_argument('--save-per-steps', default=None, type=int, required=False, help='save-per-steps')
-    parser.add_argument('--gradient-accumulation', default=10, type=int, required=False, help='gradient_accumulation')
-    parser.add_argument("--use-wandb", type=str_to_bool, nargs="?", const=True, default=False, help="use wandb or not")
-
-    # mapping
-    parser.add_argument('--layers-per-ipu', type=int, default=3, nargs="+",
-                        help='Number of decoder layers per pipeline stage, after the 0th stage (default = 3). Can be a single number, for an equal number decoder layers per IPU.\
-                                Or it can be a list of numbers, specifying number of decoder layers for each individual IPU.')
-    parser.add_argument('--batches-per-step', default=4, type=int, required=False, help='batches_per_step')
-    parser.add_argument('--replication-factor', default=1, type=int, required=False, help='replication_factor')
-    parser.add_argument('--ipus-per-replica', default=4, type=int, required=False, help='ipus_per_replica')
-    parser.add_argument("--matmul-proportion", type=float, nargs="+",
-                        help="Relative IPU memory proportion size allocated for matmul")
-    parser.add_argument("--recompute-checkpoint-every-layer", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="This controls how recomputation is handled in pipelining. "
-                             "If True the output of each encoder layer will be stashed keeping the max liveness "
-                             "of activations to be at most one layer. "
-                             "However, the stash size scales with the number of pipeline stages so this may not always be beneficial. "
-                             "The added stash + code could be greater than the reduction in temporary memory.", )
-    parser.add_argument("--recompute-checkpoint-layers", type=int, nargs="+", default=None,
-                        help="Decoder layers that will be checkpointed.")
-    parser.add_argument("--resume-training-from-checkpoint", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="Restore both the model checkpoint and training state in order to resume a training run.")
-    parser.add_argument("--embedding-serialization-factor", default=1, type=int,
-                        help="Matmul serialization factor the embedding layers")
-    parser.add_argument("--remap-logit", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="remap logits or not by custom op")
-    parser.add_argument("--optimizer-state-offchip", type=str_to_bool, nargs="?", const=True, default=True,
-                        help="Set the tensor storage location for optimizer state to be offchip.")
-    parser.add_argument("--replicated-tensor-sharding", type=str_to_bool, nargs="?", const=True, default=False,
-                        help="Enable replicated tensor sharding of optimizer state")
-
-    args = parser.parse_args()
-    # Initialise PopDist
-    if popdist.isPopdistEnvSet():
-        hvd.init()
-        args.use_popdist = True
-        if popdist.getNumTotalReplicas() != args.replication_factor:
-            print(f"The number of replicas is overridden by PopRun. "
-                  f"The new value is {popdist.getNumTotalReplicas()}.")
-        args.replication_factor = int(popdist.getNumLocalReplicas())
-        args.popdist_rank = popdist.getInstanceIndex()
-        args.popdist_size = popdist.getNumInstances()
-
-        hvd.broadcast(torch.Tensor([args.seed]), root_rank=0)
-    else:
-        args.use_popdist = False
-
-    return args
-
-
 class GTP2Wrapper(nn.Module):
     def __init__(self, args, model_config):
         super().__init__()
-
+        self.args = args
         if args.pretrained_checkpoint:  # load pretrained model checkpoint
-            self.model = GPT2LMHeadModel.from_pretrained(args.pretrained_checkpoint)
+            self.model = GPT2LMHeadModel.from_pretrained(
+                args.pretrained_checkpoint)
         else:  # init model
             self.config = model_config
             self.model = GPT2LMHeadModel(config=self.config)
 
         for layer in self.model.transformer.h:
-            gpt2_attn = OptimizedGPT2Attention(self.model.config, layer_idx=layer.attn.layer_idx)
+            gpt2_attn = OptimizedGPT2Attention(
+                self.model.config, layer_idx=layer.attn.layer_idx)
             gpt2_attn.load_state_dict(layer.attn.state_dict())
             layer.attn = gpt2_attn
 
@@ -179,8 +79,10 @@ class GTP2Wrapper(nn.Module):
 
         logger("-------------------- Device Allocation --------------------")
         logger("Embedding  --> IPU 0")
-        self.model.transformer.wte = poptorch.BeginBlock(self.model.transformer.wte, "wte", ipu_id=0)
-        self.model.transformer.wpe = poptorch.BeginBlock(self.model.transformer.wpe, "wpe", ipu_id=1)
+        self.model.transformer.wte = poptorch.BeginBlock(
+            self.model.transformer.wte, "wte", ipu_id=0)
+        self.model.transformer.wpe = poptorch.BeginBlock(
+            self.model.transformer.wpe, "wpe", ipu_id=1)
         outline_attribute(self.model.transformer.ln_f, "LayerNorm")
 
         layer_ipu = _get_layer_ipu(args.layers_per_ipu)
@@ -189,7 +91,8 @@ class GTP2Wrapper(nn.Module):
             if args.recompute_checkpoint_every_layer:
                 if (args.recompute_checkpoint_layers is None) or (index in args.recompute_checkpoint_layers):
                     recomputation_checkpoint(layer)
-            self.model.transformer.h[index] = poptorch.BeginBlock(layer, f"Encoder{index}", ipu_id=ipu)
+            self.model.transformer.h[index] = poptorch.BeginBlock(
+                layer, f"Encoder{index}", ipu_id=ipu)
             logger(f"Layer {index:<2} --> IPU {ipu}")
 
         logger(f'LM_head --> IPU 0')
@@ -199,11 +102,13 @@ class GTP2Wrapper(nn.Module):
         transformer_outputs = self.model.transformer(input_ids=input_ids)
         hidden_states = transformer_outputs[0]
         lm_logits = self.model.lm_head(hidden_states)
-        if not args.enable_sequence_serialized:
+        if not self.args.enable_sequence_serialized:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+            loss = loss_fct(
+                lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
             loss = poptorch.identity_loss(loss, reduction="none")
-            acc = calculate_acc(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+            acc = calculate_acc(
+                lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
             return loss, acc
         else:
             lm_logits = lm_logits.view(-1, lm_logits.size(-1))
@@ -211,28 +116,32 @@ class GTP2Wrapper(nn.Module):
             loss_fct = CrossEntropyLoss(reduction="sum")
             loss, acc = None, None
             loss_weights = torch.sum((labels > -1).to(torch.float), dim=-1)
-            for i in range(args.serialized_seq_len, args.max_len+args.serialized_seq_len, args.serialized_seq_len):
-                logit = lm_logits[i - args.serialized_seq_len:i, :]
-                label = labels[i - args.serialized_seq_len:i]
-                if args.remap_logit:
+            for i in range(self.args.serialized_seq_len, self.args.max_len+self.args.serialized_seq_len, self.args.serialized_seq_len):
+                logit = lm_logits[i - self.args.serialized_seq_len:i, :]
+                label = labels[i - self.args.serialized_seq_len:i]
+                if self.args.remap_logit:
                     logit_remap = poptorch.custom_op([logit],
-                                "RemapCE",
-                                "ai.graphcore",
-                                1,
-                                example_outputs=[logit],
-                                attributes={"grain_size": 8})
+                                                     "RemapCE",
+                                                     "ai.graphcore",
+                                                     1,
+                                                     example_outputs=[logit],
+                                                     attributes={"grain_size": 8})
                 if loss is None:
-                    if args.remap_logit:
-                        acc = calculate_acc(logit_remap[0], label, reduction='sum')
+                    if self.args.remap_logit:
+                        acc = calculate_acc(
+                            logit_remap[0], label, reduction='sum')
                     else:
                         acc = calculate_acc(logit, label, reduction='sum')
-                    loss = loss_fct(logit, label).to(torch.float32) + 0*acc.detach()
+                    loss = loss_fct(logit, label).to(
+                        torch.float32) + 0*acc.detach()
                 else:
-                    if args.remap_logit:
-                        tmp_acc = calculate_acc(logit_remap[0], label, reduction='sum')
+                    if self.args.remap_logit:
+                        tmp_acc = calculate_acc(
+                            logit_remap[0], label, reduction='sum')
                     else:
                         tmp_acc = calculate_acc(logit, label, reduction='sum')
-                    tmp_loss = loss_fct(logit, label).to(torch.float32) + 0*tmp_acc.detach()
+                    tmp_loss = loss_fct(logit, label).to(
+                        torch.float32) + 0*tmp_acc.detach()
                     loss += tmp_loss
                     acc += tmp_acc
             mean_loss = loss / loss_weights
@@ -246,7 +155,7 @@ if __name__ == "__main__":
     opts = get_options(args)
 
     logger("Model initializing")
-    model_config = GPT2Config.from_json_file(MODEL_CONFIG[args.model])
+    model_config = GPT2Config.from_json_file(os.path.join(file_dir, MODEL_CONFIG[args.model]))
     model = GTP2Wrapper(args, model_config).half().train()
 
     logger("Arguments: {}".format(args))
@@ -264,7 +173,8 @@ if __name__ == "__main__":
         duration_compilation = time.perf_counter() - start_compile
         logger(f"Compiled/Loaded model in {duration_compilation} secs")
         logger("-----------------------------------------------------------")
-        logger("Model successfully compiled. Exiting now as '--compile-only' argument was passed.")
+        logger(
+            "Model successfully compiled. Exiting now as '--compile-only' argument was passed.")
         sys.exit(0)
 
     # W&B
@@ -277,19 +187,24 @@ if __name__ == "__main__":
     # Dataloader
     logger("------------------- Data Loading Started ------------------")
     start_loading = time.perf_counter()
-    train_dataset, validate_dataset = load_dataset(logger, args, model_config.vocab_size)
+    train_dataset, validate_dataset = load_dataset(
+        logger, args, model_config.vocab_size)
     loader = DataLoader(opts,
                         train_dataset,
-                        shuffle=True if args.train_path.endswith('.pkl') else False,
+                        shuffle=True if args.train_path.endswith(
+                            '.pkl') else False,
                         batch_size=args.batch_size,
                         num_workers=args.num_workers,
                         worker_init_fn=_WorkerInit(args.seed),
-                        collate_fn=collate_fn if not 'dynamic' in args.train_path else None,
+                        collate_fn=collate_fn if 'dynamic' not in args.train_path else None,
                         drop_last=True,
-                        auto_distributed_partitioning=not isinstance(train_dataset, torch.utils.data.IterableDataset),
+                        auto_distributed_partitioning=not isinstance(
+                            train_dataset, torch.utils.data.IterableDataset),
                         mode=DataLoaderMode.AsyncRebatched if args.async_dataloader else DataLoaderMode.Sync)
-    samples_per_epoch = int(len(train_dataset) / args.epochs) if 'dynamic' in args.train_path else len(train_dataset)
-    steps_per_epoch = int(len(loader) / args.epochs) if 'dynamic' in args.train_path else len(loader)
+    samples_per_epoch = int(len(
+        train_dataset) / args.epochs) if 'dynamic' in args.train_path else len(train_dataset)
+    steps_per_epoch = int(
+        len(loader) / args.epochs) if 'dynamic' in args.train_path else len(loader)
     logger(f"Samples per epoch: {samples_per_epoch}")
     logger(f"Steps per epoch: {steps_per_epoch}")
     if steps_per_epoch < 1:
@@ -308,9 +223,11 @@ if __name__ == "__main__":
     else:
         lr_warmup_steps = int(args.lr_warmup * lr_decay_steps)
 
-    scheduler = get_lr_scheduler(optimizer, args.lr_schedule, lr_warmup_steps, lr_decay_steps)
+    scheduler = get_lr_scheduler(
+        optimizer, args.lr_schedule, lr_warmup_steps, lr_decay_steps)
     if args.resume_training_from_checkpoint:
-        training_state = torch.load(Path(args.pretrained_checkpoint) / "training_state.pt")
+        training_state = torch.load(
+            Path(args.pretrained_checkpoint) / "training_state.pt")
         optimizer.load_state_dict(training_state["optimizer"])
         scheduler.load_state_dict(training_state["lr_scheduler"])
 
@@ -323,7 +240,7 @@ if __name__ == "__main__":
     total_step = 0
     while epoch < args.epochs and total_step < steps_per_epoch * args.epochs:
         for batch_idx, batch in enumerate(loader):
-            if not 'dynamic' in args.train_path:
+            if 'dynamic' not in args.train_path:
                 _input_ids, _labels = batch
                 input_ids = _input_ids[:, :-1]
                 labels = _labels[:, 1:]
@@ -342,7 +259,8 @@ if __name__ == "__main__":
                 args.gradient_accumulation * args.batches_per_step / step_length
             if (batch_idx + 1) % args.log_steps == 0:
                 logger("stpe {} of epoch {}, loss: {}, acc: {}, lr: {}, Throughput: {} seq/s".format(
-                    batch_idx, epoch, outputs_sync[0], outputs_sync[1], scheduler.get_last_lr()[0],
+                    batch_idx, epoch, outputs_sync[0], outputs_sync[1], scheduler.get_last_lr()[
+                        0],
                     step_throughput))
 
             if args.use_wandb and (not args.use_popdist or args.popdist_rank == 0):
@@ -356,7 +274,8 @@ if __name__ == "__main__":
             if args.save_model_path:
                 if not args.use_popdist or args.popdist_rank == 0:
                     if args.save_per_steps is not None and (total_step % args.save_per_steps == 0):
-                        model_path = os.path.join(args.save_model_path, 'step_{}'.format(total_step))
+                        model_path = os.path.join(
+                            args.save_model_path, 'step_{}'.format(total_step))
                         logger('saving current model to {}'.format(model_path))
                         os.makedirs(model_path, exist_ok=True)
                         model.model.save_pretrained(model_path)
@@ -375,7 +294,8 @@ if __name__ == "__main__":
         if args.save_model_path:
             if not args.use_popdist or args.popdist_rank == 0:
                 if (epoch % args.save_per_epochs) == 0:
-                    model_path = os.path.join(args.save_model_path, 'epoch_{}'.format(epoch + 1))
+                    model_path = os.path.join(
+                        args.save_model_path, 'epoch_{}'.format(epoch + 1))
                     logger('saving current model to {}'.format(model_path))
                     os.makedirs(model_path, exist_ok=True)
 
@@ -390,4 +310,3 @@ if __name__ == "__main__":
                         "acc": outputs_sync[1],
                         "config": args
                     }, os.path.join(model_path, "training_state.pt"))
-        epoch += 1

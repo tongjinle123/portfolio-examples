@@ -108,8 +108,10 @@ class TFRecordPretrainingDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is not None:
             if popdist.isPopdistEnvSet():
-                self.worker_id = worker_info.id + worker_info.num_workers * popdist.getInstanceIndex()
-                self.shard = worker_info.id + worker_info.num_workers * popdist.getInstanceIndex(), worker_info.num_workers * popdist.getNumInstances()
+                self.worker_id = worker_info.id + \
+                    worker_info.num_workers * popdist.getInstanceIndex()
+                self.shard = worker_info.id + worker_info.num_workers * \
+                    popdist.getInstanceIndex(), worker_info.num_workers * popdist.getNumInstances()
             else:
                 self.worker_id = worker_info.id
                 self.shard = worker_info.id, worker_info.num_workers
@@ -127,7 +129,8 @@ class TFRecordPretrainingDataset(IterableDataset):
             if self.file_index >= len(self.files):
                 raise StopIteration
             self.reader = tfrecord_loader(self.files[self.file_index],
-                                          self.files[self.file_index].replace(".tfrecord", ".index"),
+                                          self.files[self.file_index].replace(
+                                              ".tfrecord", ".index"),
                                           list(TFRECORD_KEYS),
                                           self.shard)
             self.file_index += 1
@@ -175,9 +178,12 @@ def load_dataset(logger, args, vocab_size):
         data_prefix = args.data_prefix
         indexed_dataset = make_indexed_dataset(data_prefix)
         total_num_of_documents = indexed_dataset.sizes.shape[0]
-        documents = np.arange(start=0, stop=total_num_of_documents, step=1, dtype=np.int32)
-        train_dataset = GPTDataset(args, data_prefix, documents[:int(total_num_of_documents*0.997)], indexed_dataset)
-        val_dataset = GPTDataset(args, data_prefix, documents[int(total_num_of_documents*0.997):], indexed_dataset, num_epochs=1)
+        documents = np.arange(
+            start=0, stop=total_num_of_documents, step=1, dtype=np.int32)
+        train_dataset = GPTDataset(args, data_prefix, documents[:int(
+            total_num_of_documents*0.997)], indexed_dataset)
+        val_dataset = GPTDataset(args, data_prefix, documents[int(
+            total_num_of_documents*0.997):], indexed_dataset, num_epochs=1)
     else:
         try:
             with open(train_path, "rb") as f:
@@ -187,7 +193,8 @@ def load_dataset(logger, args, vocab_size):
             for article in input_list:
                 start_point = 0
                 while start_point < len(article) - args.max_len:
-                    samples.append(article[start_point: start_point + args.max_len])
+                    samples.append(
+                        article[start_point: start_point + args.max_len])
                     start_point += args.stride
                 if start_point < len(article) and len(article) >= (args.max_len // 2):
                     samples.append(article[len(article) - args.max_len:])
@@ -201,7 +208,8 @@ def load_dataset(logger, args, vocab_size):
             train_dataset = MyDataset(input_list_train, args.max_len)
             val_dataset = MyDataset(input_list_val, args.max_len)
         except:
-            raise RuntimeError(f"Unknown dataset '{train_path}', you can try \'generated\'.")
+            raise RuntimeError(
+                f"Unknown dataset '{train_path}', you can try \'generated\'.")
 
     return train_dataset, val_dataset
 
@@ -216,7 +224,8 @@ class GeneratedPretrainingDataset(Dataset):
     def generate_data(self):
         with torch.random.fork_rng():
             torch.manual_seed(self.seed)
-            input_ids = torch.randint(0, self.vocab_size, [self.sequence_length],dtype=torch.long)
+            input_ids = torch.randint(
+                0, self.vocab_size, [self.sequence_length], dtype=torch.long)
             label = input_ids
         return input_ids, label
 
@@ -228,7 +237,8 @@ class GeneratedPretrainingDataset(Dataset):
 
 
 def get_generated_datum(config, vocab_size):
-    samples_per_step = config.replication_factor * config.gradient_accumulation * config.batch_size * config.batches_per_step
+    samples_per_step = config.replication_factor * \
+        config.gradient_accumulation * config.batch_size * config.batches_per_step
     result = []
     dataset = GeneratedPretrainingDataset(vocab_size, config.max_len)
     data = (dataset[i] for i in range(samples_per_step))
@@ -246,9 +256,12 @@ def calculate_acc(logit, labels, ignore_index=-100, reduction='mean'):
 
 
 def collate_fn(batch):
-    input_ids = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
-    labels = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=-100)
+    input_ids = rnn_utils.pad_sequence(
+        batch, batch_first=True, padding_value=0)
+    labels = rnn_utils.pad_sequence(
+        batch, batch_first=True, padding_value=-100)
     return input_ids, labels
+
 
 class _WorkerInit:
     def __init__(self, seed):
@@ -277,11 +290,13 @@ def get_lr_scheduler(optimizer,
                      lr_warmup=None,
                      num_steps=None):
     if scheduler_type == "linear":
-        scheduler = get_linear_schedule_with_warmup(optimizer, lr_warmup, num_steps)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, lr_warmup, num_steps)
     elif scheduler_type == "constant":
         scheduler = get_constant_schedule(optimizer)
     elif scheduler_type == "cosine":
-        scheduler = get_cosine_schedule_with_warmup(optimizer, lr_warmup, num_steps)
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, lr_warmup, num_steps)
     else:
         raise ValueError("Unknown scheduler_type:", scheduler_type)
 
@@ -428,7 +443,8 @@ class SerializedLinear(nn.Linear):
 
     def forward(self, x):
         size_out = x.size()[:-1] + (self.out_features,)
-        output = poptorch.serializedMatMul(x, self.weight.t(), self.mode, self.factor)
+        output = poptorch.serializedMatMul(
+            x, self.weight.t(), self.mode, self.factor)
         if self.bias is not None:
             output += self.bias
         return output.view(*size_out)

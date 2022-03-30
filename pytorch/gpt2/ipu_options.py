@@ -22,7 +22,7 @@ import popdist
 import popdist.poptorch
 import numpy as np
 
-from utils import logger
+from tools import logger
 
 
 def get_options(config):
@@ -41,13 +41,15 @@ def get_options(config):
         if os.path.exists(CUSTOM_OP_PATH):
             ops_and_patterns = ctypes.cdll.LoadLibrary(CUSTOM_OP_PATH)
         else:
-            logger("Could not find custom_ops.so. Execute `make` before running this script.")
+            logger(
+                "Could not find custom_ops.so. Execute `make` before running this script.")
             exit()
 
     # Poptorch options
     if config.use_popdist:
         # Use popdist.poptorch options if running in distributed mode
-        opts = popdist.poptorch.Options(ipus_per_replica=config.ipus_per_replica)
+        opts = popdist.poptorch.Options(
+            ipus_per_replica=config.ipus_per_replica)
     else:
         opts = poptorch.Options()
         # Set the replication factor
@@ -56,11 +58,12 @@ def get_options(config):
     opts.autoRoundNumIPUs(True)
     opts.deviceIterations(config.batches_per_step)
     opts.Training.gradientAccumulation(config.gradient_accumulation)
-    opts.Training.accumulationAndReplicationReductionType(poptorch.ReductionType.Mean)
+    opts.Training.accumulationAndReplicationReductionType(
+        poptorch.ReductionType.Mean)
     opts.outputMode(poptorch.OutputMode.Sum)
     opts.TensorLocations.setOptimizerLocation(poptorch.TensorLocationSettings()
-                                             .useOnChipStorage(not config.optimizer_state_offchip)
-                                             .useReplicatedTensorSharding(config.replicated_tensor_sharding))
+                                              .useOnChipStorage(not config.optimizer_state_offchip)
+                                              .useReplicatedTensorSharding(config.replicated_tensor_sharding))
     opts.randomSeed(config.seed)
     opts.setExecutionStrategy(
         poptorch.PipelinedExecution(poptorch.AutoStage.AutoIncrement))
@@ -85,12 +88,15 @@ def get_options(config):
     opts._Popart.set("outlineThreshold", 10.0)
     opts._Popart.set("accumulateOuterFragmentSettings.schedule",
                      int(popart.AccumulateOuterFragmentSchedule.OverlapMemoryOptimized))
-    opts._Popart.set("accumulateOuterFragmentSettings.excludedVirtualGraphs", ["0"])
+    opts._Popart.set(
+        "accumulateOuterFragmentSettings.excludedVirtualGraphs", ["0"])
     # Enable patterns for better throughput and memory reduction
-    opts._Popart.set("subgraphCopyingStrategy", int(popart.SubgraphCopyingStrategy.JustInTime))
+    opts._Popart.set("subgraphCopyingStrategy", int(
+        popart.SubgraphCopyingStrategy.JustInTime))
     opts._Popart.set("decomposeGradSum", True)
     opts._Popart.set("scheduleNonWeightUpdateGradientConsumersEarly", True)
-    opts._Popart.setPatterns({"TiedGather": True, "TiedGatherAccumulate": True, "UpdateInplacePrioritiesForIpu": True})
+    opts._Popart.setPatterns(
+        {"TiedGather": True, "TiedGatherAccumulate": True, "UpdateInplacePrioritiesForIpu": True})
 
     opts._Popart.set("saveInitializersToFile", "weights.bin")
 

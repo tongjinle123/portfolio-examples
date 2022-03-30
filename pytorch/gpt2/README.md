@@ -2,26 +2,41 @@
 
 This directory contains an implementation of GPT2 models in PyTorch for the IPU, leveraging the HuggingFace Transformers library. 
 
-There is one example for GPT2 pre-training: `train_gpt2.py`
+There are two examples for GPT2, the one is for pretraining: `train_gpt2.py` and the second one is text generation `text_generate_gpt2.py`
 
 ## Environment setup
 
-First, install the Poplar SDK following the instructions in the Getting Started guide for your IPU system. Make sure to source the `enable.sh` scripts for Poplar and PopART.
-
+### 1. Install the Poplar SDK
 SDK version: 2.5
 
-Then, create a virtual environment, install the required packages and build the custom ops.
+First, install the Poplar SDK following the instructions in the Getting Started guide for your IPU system. Make sure to source the `enable.sh` scripts for Poplar and PopART.
 
+Then, create a virtualenv:
 ```
 virtualenv venv -p python3.6
 source venv/bin/activate
-pip3 install -r requirements.txt
+```
+### 2. Compile custom ops
+From inside this directory:
+```
 make
 ```
+This should create `custom_ops.so`.
+
+### 3. Python
+Install the required packages:
+```
+pip install -r requirements.txt
+pip install --no-cache-dir horovod
+```
+
+## Run the tests (optional)
+Setup your environment as explained above and run `python3 -mv pytest` from the root folder.
+
 
 ## Quick start with generated mock dataset
 
-Setup your environment as explained above and run the example with the configuration of your choice.
+Setup your environment as explained above and run the example with generated datas.
 
 ```
 python train_gpt2.py \
@@ -39,7 +54,7 @@ python train_gpt2.py \
     --train-path generated
 ```
 
-## Generate pretraining dataset
+## Generate pretraining data
 
 The dataset used for pretraining is WIKI-103. It can be generated from a RAW dump of Wikipedia following a five step process.
 
@@ -55,7 +70,7 @@ Dumps are available from <https://dumps.wikimedia.org/> (and mirrors) and are li
 
 ### 2. Extraction
 
-In order to create the pre-training data we need to extract the Wikipedia dump and put it in this form:
+In order to create the pretraining data we need to extract the Wikipedia dump and put it in this form:
 
 ```text
 <doc id = article1>
@@ -96,42 +111,124 @@ In other words you should probably not expect all of `AC`, `AD`, ... `ZX`, `ZY`,
 
 ### 3. Pre-processing
 
-Use the `wikipedia_preprocess.py` script to preprocess and tokenize the extracted files and get the `.pkl` data.
+Use the `wikipedia_preprocess.py` script to preprocess and tokenize the extracted files.
+
+Huggingface's `tokenizer.GPT2Tokenizer` is used in this step as default.
+
 ```
 python3 ./data/wikipedia_preprocess.py --input-file-path <chosen-folder-for-extracted-files> --output-file-path <chosen-folder-for-preprocessed-files>
 ```
 
-## Run the pre-training application of GPT2-small
-**Notice**: The default scripts are used to get benchmarks for throughput only. You must passing path to processed data files to `--train-path` to start the actual pre-training, you may also need to specify the `--save-model-path` to save checkpoints. Further arguments are described in the source file `train_gpt2.py` and hyperparameters for model are listed in json files in `config/`.
+Now you should get the `.pkl` data, which will be used in the pretraining.
 
-This script runs the 117M parameter GPT2 pre-training.
+## Run the pretraining application
+**Notice**: The default scripts are used to get benchmarks for throughput only. You must passing path to processed data files to `--train-path` to start the actual pretraining, you may also need to specify the `--save-model-path` to save checkpoints. Further arguments are described in the source file `arguments.py`.
+
+There are four GPT2 models:
+* GPT2 Small - 12 layers (transformer blocks), 117 million parameters
+* GPT2 Medium - 24 layers (transformer blocks), 345 million parameters
+* GPT2 Large - 36 layers (transformer blocks), 762 million parameters
+* GPT2 XLarge - 48 layers (transformer blocks), 1542 million parameters
+
+The JSON configuration files provided in the configs directory `config/` define detailed parameters for GPT2 models.
+
+### Run GPT2-small
+This script runs the 117M parameter GPT2 pretraining.
 ```
 bash run/pretraining_small.sh
 ```
-
-## Run the pre-training application of GPT2-medium
-This script runs the 345M parameter GPT2 pre-training.
+or
+```
+python train_gpt2.py \
+    --model gpt2 \
+    --max-len 1024 \
+    --optimizer AdamW \
+    --learning-rate 0.00004 \
+    --lr-schedule cosine \
+    --lr-warmup 0.01 \
+    --layers-per-ipu 0 4 4 4 \
+    --matmul-proportion 0.05 0.10 0.10 0.10 \
+    --ipus-per-replica 4 \
+    --replication-factor 4 \
+    --epochs 5 \
+    --gradient-accumulation 2048 \
+    --batches-per-step 8 \
+    --batch-size 1 \
+    --enable-sequence-serialized True \
+    --embedding-serialization-factor 8 \
+    --recompute-checkpoint-every-layer True \
+    --enable-half-partials True \
+    --train-path 'generated' \
+    --replicated-tensor-sharding True \
+    --compile-only False
+```
+### Run GPT2-medium
+This script runs the 345M parameter GPT2 pretraining.
 ```
 bash run/pretraining_medium.sh
 ```
-
-## Run the pre-training application of GPT2-large(SL=512)
-This script runs the 762M parameter GPT2 pre-training, with sequence length=512.
+or
+```
+python train_gpt2.py \
+    --model gpt2-medium \
+    --max-len 1024 \
+    --optimizer AdamW \
+    --learning-rate 0.00004 \
+    --lr-schedule cosine \
+    --lr-warmup 0.01 \
+    --layers-per-ipu 0 3 3 3 3 4 4 4 \
+    --matmul-proportion 0.15 0.15 0.15 0.15 0.15 0.15 0.15 0.15 \
+    --ipus-per-replica 8 \
+    --replication-factor 2 \
+    --epochs 5 \
+    --gradient-accumulation 4096 \
+    --batches-per-step 8 \
+    --batch-size 1 \
+    --enable-sequence-serialized True \
+    --embedding-serialization-factor 8 \
+    --recompute-checkpoint-every-layer True \
+    --enable-half-partials True \
+    --train-path 'generated' \
+    --replicated-tensor-sharding True \
+    --compile-only False
+```
+### Run GPT2-large(SL=512)
+This script runs the 762M parameter GPT2 pretraining, with sequence length=512.
 ```
 bash run/pretraining_large.sh
 ```
-
-## Run the pre-training application of GPT2-large by poprun
-This script runs the 762M parameter GPT2 distributed pre-training using PopRun, which can scale the application from POD16 to POD256 and further.
+or
+```
+python train_gpt2.py \
+    --model gpt2-large \
+    --max-len 512 \
+    --optimizer AdamW \
+    --learning-rate 0.00015 \
+    --lr-schedule cosine \
+    --lr-warmup 0.01 \
+    --layers-per-ipu 0 5 5 5 5 5 5 6 \
+    --matmul-proportion 0.40 0.12 0.15 0.15 0.15 0.15 0.15 0.10 \
+    --ipus-per-replica 8 \
+    --replication-factor 2 \
+    --epochs 5 \
+    --gradient-accumulation 4096 \
+    --batches-per-step 8 \
+    --batch-size 1 \
+    --enable-sequence-serialized False \
+    --embedding-serialization-factor 8 \
+    --recompute-checkpoint-every-layer True \
+    --enable-half-partials True \
+    --train-path 'generated' \
+    --replicated-tensor-sharding True \
+    --compile-only False
+```
+### Run GPT2-large by PopRun
+This script runs the 762M parameter GPT2 distributed pretraining using PopRun, which can scale the application from POD16 to POD256 and further.
 
 We advise you to first read through the [User Guide](https://docs.graphcore.ai/projects/poprun-user-guide/en/latest/index.html) for PopRun before running this script.
 ```
 bash run/pretraining_large_poprun.sh
 ```
-
-## Run the tests (optional)
-
-Setup your environment and generate the sample dataset as explained above and run `python3 -m pytest` from the root folder.
 
 ## TFRecord dataset (optional)
 In order to use the multi-threaded `dataloader`, `tfrecord` files need to be generated.
@@ -195,42 +292,25 @@ bash tasks/run_evaluate.sh lmbd
 ```
 bash tasks/run_text_generator.sh
 ```
-We generate text samples using the pretrained GPT2 model. 
-Few changes need to make, such as we need to provide the path to the pretrained checkpoint, 
-the length of the output samples.
+or
+```
+python text_generate_gpt2.py \
+      --model-name-or-path gpt2 \
+      --fp16 true \
+      --single-ipu true \
+      --poptorch-loop true \
+      --output-len 256
+```
+This task is interactive. You can enter one sentence such as "My name is " and it will generate the rest sentences.  
 
-## Benchmark
-We have pretrained GPT2-Medium on both GPU and IPU using the Wikipedia dataset.
+| Arguments | Meaning |
+| ---- | ---- | 
+| --model-name-or-path | Loading pretrained GPT2-small checkpoint from huggingface.co. The default is gpt2 |
+| --fp16 | Whether to use fp16 model for this task|
+| --single-ipu | Whether to use single IPU for this task |
+| --poptorch_loop| Whether to use poptorch_loop to optimize the latency, only supported on single ipu|
+| --batch-size| batch size for inference. The defult is 1|
+| --input-len| The maximum input length you want to set for this task|
+| --output-len| The maximum output length you want to set for this task|
 
-|model| device | vocab size | sequence length | optimizer | global batch size | pretraining steps | LM loss | throughput (samples/s) | lambada acc (strict) | lambada acc (non-strict) | wiki (ppl) | wiki (adjusted ppl) |
-| ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- |
-| GPT2-Medium | 8*V100 | 50256 | 1024 | Adam | 1024 | 34k | 3.07 | 112 | 19.35% | 36.04% | 29.16 | 40.97 |
-| GPT2-Medium | 8*V100 | 50256 | 1024 | Adam | 1024 | 55k | 2.94 | 112 | 21.21% | 37.55% | 26.03 | 36.16 |
-| GPT2-Medium | POD16 | 50272 | 1024 | AdamW | 1024 | 22k | 3.04 | 232 | 19.56% | 36.10% | 28.42 | 39.83 |
-| GPT2-Medium | POD16 | 50272 | 1024 | AdamW | 1024 | 36k | 2.89 | 232 | 22.16% | 38.29% | 25.14 | 34.80 |
-
-
-## Licensing
-
-The code presented here is licensed under the Apache License Version 2.0, see the LICENSE file in this directory.
-
-This directory includes derived work from the following:
-
-GPT2, https://github.com/huggingface/transformers/blob/master/src/transformers/models/gpt2/modeling_gpt2.py
-
-Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
-Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-Copyright (c) 2021 Graphcore Ltd. All rights reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Further arguments are described in the source file `text_generate_gpt2.py`

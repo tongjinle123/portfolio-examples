@@ -12,7 +12,7 @@
 /// Check the Targeting the IPU from TensorFlow document for
 /// the API level required for the version of the Poplar SDK that you are using.
 extern "C" {
-  int32_t custom_op_api_level = 4;
+  int32_t custom_op_api_level = 5;
 }
 
 /// This is an elementwise operation, so we tell the framework using the

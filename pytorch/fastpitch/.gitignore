@@ -1,0 +1,9 @@
+pretrained_models/
+output/
+LJSpeech-1.1/
+log.json
+test.py
+training/
+cached_data/
+exec/
+.pytest_cache/
